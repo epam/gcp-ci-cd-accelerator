@@ -1,0 +1,393 @@
+# Copyright 2023 EPAM Systems
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+steps:
+  # Run terraform plan command to see planned changes
+  - id: Terraform PLAN test
+    name: 'hashicorp/terraform:$_TF_VERSION'
+    args:
+      - '-c'
+      - |
+        echo ""
+        echo "*********** Terraform PLAN test *************"
+        echo "*********** At directory: $_DIR ************"
+        echo "*********** $_PROJECT_BUCKET ***************"
+
+        if [ $_RUN_TF_PLAN == "true" ]; then
+          # Run 'terraform plan' only if backend is declared
+          if [ -f backend.tf ]; then
+            terraform init \
+              -backend-config="bucket=$_PROJECT_BUCKET" > /dev/null
+            
+            terraform validate -no-color > /tf_test_reports/tf_validate.txt
+
+            terraform plan \
+              -lock=false \
+              -var-file=/workspace/extravars.tfvars \
+              --out terraform.plan > /dev/null
+
+            terraform show \
+              -json terraform.plan > /tf_test_reports/tf_plan.json
+
+            terraform show \
+              -no-color terraform.plan > /tf_test_reports/tf_plan.txt
+          else
+            terraform init > /dev/null
+
+            terraform validate -no-color > /tf_test_reports/tf_validate.txt
+
+            echo "No backend.tf was found - plan generation was skipped" > /tf_test_reports/tf_plan.txt
+          fi
+        else
+          echo "Skip the test"
+        fi
+    dir: $_DIR
+    entrypoint: 'sh'
+    secretEnv:
+      - TF_VAR_git_token
+    volumes:
+      - name: tf_test_reports
+        path: /tf_test_reports
+  # The terraform fmt command is used to rewrite Terraform configuration files
+  # to a canonical format and style
+  - id: Terraform FMT test
+    name: 'hashicorp/terraform:$_TF_VERSION'
+    args:
+      - '-c'
+      - |
+        echo ""
+        echo "*********** Terraform FMT test *************"
+        echo "*********** At directory: $_DIR ************"
+        echo "********************************************"
+
+        if [ $_RUN_TF_FMT == "true" ]; then
+          if [ "$(terraform fmt)" != "" ]; then
+            echo -e "\nModule is not properly formatted." \
+              "\nRun 'terrafrom fmt -recursive' to fix.\n" \
+              > /tf_test_reports/terraform-fmt.res
+            echo 'terraform fmt' >> /tf_test_reports/error
+          else 
+            echo -e "\nAll fine / No Error\n" > /tf_test_reports/terraform-fmt.res
+          fi
+        else 
+          echo "Skip the test."
+        fi
+    dir: $_DIR
+    entrypoint: 'sh'
+    volumes:
+      - name: tf_test_reports
+        path: /tf_test_reports
+  # A utility to generate documentation from Terraform modules in various output formats.    
+  - id: Terraform-docs test
+    name: gcr.io/cloud-builders/wget
+    args:
+      - '-c'
+      - |
+        echo ""
+        echo "*********** Terraform-docs test ************"
+        echo "*********** At directory: $_DIR ************"
+        echo "********************************************"
+        if [ $_RUN_TF_DOCS == "true" ]; then
+          wget \
+            --output-document=terraform-docs.tar.gz \
+            --quiet \
+            'https://terraform-docs.io/dl/v${_TFDOCS_VERSION}/terraform-docs-v${_TFDOCS_VERSION}-linux-amd64.tar.gz'
+
+          tar -xzf terraform-docs.tar.gz
+          chmod +x terraform-docs
+          mv terraform-docs /usr/local/bin/terraform-docs
+
+          if [[ ! -f README.md ]]; then
+            echo -e "\nModule is not documented properly, add README.md file to fix." > /tf_test_reports/terraform-docs.res
+            echo 'terraform-docs' >> /tf_test_reports/error
+          elif [[ $(diff --changed-group-format=\'%>\' --unchanged-group-format=\'\' README.md <(terraform-docs markdown table ./)) != "" ]]; then
+            echo -e "\nAdd terrafrom-docs data to README.md file.\n" > /tf_test_reports/terraform-docs.res
+            echo 'terraform-docs' >> /tf_test_reports/error
+            cp README.md /tf_test_reports/README.md
+          else
+            echo -e "\nAll fine / No Error\n" > /tf_test_reports/terraform-docs.res
+            cp README.md /tf_test_reports/README.md
+          fi
+        else 
+          echo "Skip the test."
+        fi
+    dir: $_DIR
+    entrypoint: bash
+    volumes:
+      - name: tf_test_reports
+        path: /tf_test_reports
+  # TFLint is a framework and each feature is provided by plugins, the key features are as follows: 
+  # Find possible errors, unused declarations, naming conventions      
+  - id: Tflint test
+    name: gcr.io/cloud-builders/wget
+    args:
+      - '-c'
+      - |
+        echo ""
+        echo "*************** Tflint test ****************"
+        echo "*********** At directory: $_DIR ************"
+        echo "********************************************"
+        if [ $_RUN_TF_LINT == "true" ]; then
+          wget \
+            --output-document=tflint.zip \
+            --quiet \
+            'https://github.com/terraform-linters/tflint/releases/download/v${_TFLINT_VERSION}/tflint_linux_amd64.zip'
+
+          export DEBCONF_NOWARNINGS=yes
+          apt-get update -yqq > /dev/null
+          apt-get install unzip jq -yqq > /dev/null
+          unzip tflint.zip         
+          chmod +x ./tflint 
+          mv tflint /usr/local/bin/tflint
+
+          tflint \
+            --var-file=/workspace/extravars.tfvars \
+            --format=json > tflint.json 
+            
+          cat tflint.json | jq > /tf_test_reports/tflint.json
+
+          cat /tf_test_reports/tflint.json | md5sum -c --status \
+            <(echo -e "{\n  \"issues\": [],\n  \"errors\": []\n}" | md5sum) && echo ok || echo 'tflint' >> /tf_test_reports/error
+        else 
+          echo "Skip the test."
+        fi
+    dir: $_DIR
+    entrypoint: bash
+    volumes:
+      - name: tf_test_reports
+        path: /tf_test_reports
+  # Tfsec uses static analysis of your terraform code to spot potential misconfigurations    
+  - id: Tfsec test
+    name: gcr.io/cloud-builders/wget
+    args:
+      - '-c'
+      - |
+        echo ""
+        echo "*************** Tfsec test *****************"
+        echo "*********** At directory: $_DIR ************"
+        echo "********************************************"
+        if [ $_RUN_TF_SEC == "true" ]; then
+          wget \
+            --output-document=tfsec \
+            --quiet \
+            'https://github.com/aquasecurity/tfsec/releases/download/v${_TFSEC_VERSION}/tfsec-linux-amd64'
+
+          chmod +x ./tfsec  
+          mv tfsec /usr/local/bin/tfsec 
+
+          tfsec \
+            -f json \
+            --soft-fail \
+            --out /tf_test_reports/tfsec.json
+
+          cat /tf_test_reports/tfsec.json | md5sum -c --status \
+            <(echo -e "{\n\t\"results\": []\n}" | md5sum) && echo ok || echo 'tfsec' >> /tf_test_reports/error
+        else 
+          echo "Skip the test."
+        fi
+    dir: $_DIR
+    entrypoint: bash
+    volumes:
+      - name: tf_test_reports
+        path: /tf_test_reports
+  # Open Policy Agent general-purpose policy engine that enables unified, 
+  # context-aware policy enforcement across the entire stack
+  - id: OPA test
+    name: gcr.io/cloud-builders/wget
+    args:
+      - '-c'
+      - |
+        echo ""
+        echo "*************** OPA test ******************"
+        echo "*********** At directory: $_DIR ***********"
+        echo "*******************************************"
+        if [ $_RUN_TF_OPA == "true" ]; then
+          if [ -f /tf_test_reports/tf_plan.json ]; then
+            wget \
+              --output-document=opa \
+              --quiet \
+              'https://github.com/open-policy-agent/opa/releases/download/v${_TFOPA_VERSION}/opa_linux_amd64_static'
+
+            chmod +x opa
+            mv opa /usr/local/bin/opa
+
+            opa eval \
+              --data /workspace/modules/tf-audit/terraform.rego \
+              --input /tf_test_reports/tf_plan.json \
+              "data.compute.disk.encryption.authz" \
+              > /tf_test_reports/opa_res.json
+
+            cat /tf_test_reports/opa_res.json | md5sum -c --status \
+              <(echo "{}" | md5sum) && echo ok || echo 'open policy agent' >> /tf_test_reports/error
+          else
+            echo -e "\nNo Terraform plan - skipped."
+            echo "{}" > /tf_test_reports/opa_res.json
+          fi
+        else 
+          echo "Skip the test."
+        fi
+    dir: $_DIR
+    entrypoint: bash
+    volumes:
+      - name: tf_test_reports
+        path: /tf_test_reports
+  # Checkov scans cloud infrastructure configurations to find misconfigurations before they're deployed    
+  - id: Checkov test
+    name: 'bridgecrew/checkov:$_TFCHECKOV_VERSION'
+    args:
+      - '-c'
+      - |
+        echo ""
+        echo "*************** Checkov test ***************"
+        echo "*********** At directory: $_DIR ************"
+        echo "********************************************"
+        if [ $_RUN_TF_CHECKOV == "true" ]; then
+          apt-get update
+          apt-get install -y jq
+
+          checkov \
+            --framework terraform \
+            --directory . \
+            --output json \
+            --soft-fail \
+            --quiet \
+            > /tf_test_reports/checkov_res.json
+
+          if [ "$(jq -r '.failed' < /tf_test_reports/checkov_res.json)" != "null" ]; then 
+            jq -r '.failed' < /tf_test_reports/checkov_res.json | grep -qE '^0$' && echo ok || echo 'checkov' >> /tf_test_reports/error
+          elif [ "$(jq -r '.summary.failed' < /tf_test_reports/checkov_res.json)" != "null" ]; then
+            jq -r '.summary.failed' < /tf_test_reports/checkov_res.json | grep -qE '^0$' && echo ok || echo 'checkov' >> /tf_test_reports/error
+          else
+            echo "Unable to parse checkout output"
+          fi
+        else 
+          echo "Skip the test."
+        fi
+    dir: $_DIR
+    entrypoint: bash
+    volumes:
+      - name: tf_test_reports
+        path: /tf_test_reports
+  # Show test results
+  - id: Generate report
+    name: gcr.io/cloud-builders/wget
+    args:
+      - '-c'
+      - |
+        echo ""
+        echo "************* Generate report **************"
+        echo "*********** At directory: $_DIR ************"
+        echo "********************************************"
+
+        if [ $_RUN_TF_PLAN == "true" ]; then
+          echo -e "\nTerraform validate results : "
+          cat /tf_test_reports/tf_validate.txt
+
+          echo -e "\nTerraform plan results : "
+          cat /tf_test_reports/tf_plan.txt
+        fi
+
+        if [ $_RUN_TF_FMT == "true" ]; then 
+          echo -e "\nTerraform fmt results : "
+          cat /tf_test_reports/terraform-fmt.res
+        fi
+
+        if [ $_RUN_TF_DOCS == "true" ]; then 
+          echo -e "\nREADME.md results : "
+          cat /tf_test_reports/terraform-docs.res
+          if [ $_SHOW_README == "true" ]; then
+            if [ -f /tf_test_reports/README.md ]; then
+              cat /tf_test_reports/README.md
+            else
+              echo -e "\nREADME.md print enabled but nothing to show."
+            fi
+          fi
+        fi
+
+        if [ $_RUN_TF_LINT == "true" ]; then
+          echo -e "\nTFlint results : "
+          cat /tf_test_reports/tflint.json 
+        fi
+
+        if [ $_RUN_TF_SEC == "true" ]; then
+          echo -e "\n\nTFsec results : "
+          cat /tf_test_reports/tfsec.json 
+        fi
+
+        if [ $_RUN_TF_OPA == "true" ]; then
+          echo -e "\nOPA results : "
+          cat /tf_test_reports/opa_res.json
+        fi
+
+        if [ $_RUN_TF_CHECKOV == "true" ]; then
+          echo -e "\nCheckov results : "
+          cat /tf_test_reports/checkov_res.json
+        fi
+    dir: $_DIR
+    entrypoint: bash
+    volumes:
+      - name: tf_test_reports
+        path: /tf_test_reports
+  # Quality gate
+  - id: Check result
+    name: gcr.io/cloud-builders/wget
+    args:
+      - '-c'
+      - |
+        echo ""
+        echo "************** Check result ****************"
+        echo "*********** At directory: $_DIR ************"
+        echo "********************************************"
+        echo "Skip Errors : $_SKIP_ERRORS"
+
+        if [ -f /tf_test_reports/error ]; then
+          echo "Issues found, see failed tests and relevant report:"
+          cat /tf_test_reports/error
+          if [ $_SKIP_ERRORS == "false" ]; then 
+            exit 1
+          fi
+        fi
+    dir: $_DIR
+    entrypoint: bash
+    volumes:
+      - name: tf_test_reports
+        path: /tf_test_reports
+substitutions:
+  _DIR: ''
+  _PROJECT_BUCKET: ''
+  _RUN_TF_PLAN: 'true'
+  _RUN_TF_FMT: 'true'
+  _RUN_TF_DOCS: 'true'
+  _RUN_TF_LINT: 'true'
+  _RUN_TF_SEC: 'true'
+  _RUN_TF_OPA: 'true'
+  _RUN_TF_CHECKOV: 'true'
+  _TF_VERSION: ''
+  _TFDOCS_VERSION: ''
+  _TFLINT_VERSION: ''
+  _TFSEC_VERSION: ''
+  _TFOPA_VERSION: ''
+  _TFCHECKOV_VERSION: ''
+  _SHOW_README: 'false'
+  _SKIP_ERRORS: 'true'
+  _LOGS_BUCKET: ''
+  _SERVICE_ACCOUNT: ''
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/git-token/versions/latest
+      env: TF_VAR_git_token
+options:
+  logging: GCS_ONLY
+logsBucket: gs://$_LOGS_BUCKET
+serviceAccount: projects/$PROJECT_ID/serviceAccounts/$_SERVICE_ACCOUNT

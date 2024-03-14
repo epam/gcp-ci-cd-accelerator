@@ -29,7 +29,7 @@ Create GitHub access token with `repo` and `admin:repo_hook` access scopes.
 Clone infrastructure repository
 
 ```
-git clone https://github.com/jdm-org/tf.git
+git clone https://github.com/epam/gcp-ci-cd-accelerator.git
 cd ./tf
 ```
 
