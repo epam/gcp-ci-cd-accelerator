@@ -1,0 +1,319 @@
+# Copyright 2023 EPAM Systems
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+steps:
+
+  - id: Destroy Infra Triggers
+    name: hashicorp/terraform:$_TF_VERSION
+    args:
+      - '-c'
+      - |
+        if [ $_IAC_ENABLED == "true" ] && [ $_ENVIRONMENT != "prod" ]; then
+        terraform init \
+          -backend-config="bucket=$_PROJECT_BUCKET" || exit 1
+
+        terraform destroy \
+          -var 'project=$_PROJECT_ID' -var 'region=$_REGION' -auto-approve
+        fi
+    dir: environments/$_ENVIRONMENT/infra-triggers
+    entrypoint: sh
+    timeout: 600s
+
+  - id: Destroy CI Triggers
+    name: hashicorp/terraform:$_TF_VERSION
+    args:
+      - '-c'
+      - |
+        if [ $_CI_ENABLED == "true" ] && [ $_ENVIRONMENT != "prod" ]; then
+
+        terraform init \
+          -backend-config="bucket=$_PROJECT_BUCKET" || exit 1
+
+        terraform destroy \
+          -var 'project=$_PROJECT_ID' -var 'region=$_REGION' -auto-approve
+        fi
+    dir: environments/$_ENVIRONMENT/cloudbuild-ci
+    entrypoint: sh
+
+  - id: Destroy CD Triggers
+    name: hashicorp/terraform:$_TF_VERSION
+    args:
+      - '-c'
+      - |
+        if [ $_CD_ENABLED == "true" ] && [ $_ENVIRONMENT != "prod" ]; then
+
+        terraform init \
+          -backend-config="bucket=$_PROJECT_BUCKET" || exit 1
+
+        terraform destroy \
+          -var 'project=$_PROJECT_ID' -var 'region=$_REGION' -auto-approve
+        fi
+    dir: environments/$_ENVIRONMENT/cloudbuild-cd
+    entrypoint: sh
+
+  - id: Destroy Webhook Triggers
+    name: gcr.io/cloud-builders/gcloud
+    args:
+      - '-c'
+      - |
+        if [ $_WEBHOOK_ENABLED == "true" ] && [ $_ENVIRONMENT != "prod" ]; then
+
+          export DEBCONF_NOWARNINGS=yes
+          apt-get update -yqq > /dev/null
+          apt-get install unzip -yqq > /dev/null
+
+          if gsutil -q stat gs://${_PROJECT_BUCKET}/releases/terraform_${_TF_VERSION}_linux_amd64.zip
+          then
+            gsutil -q cp \
+            gs://${_PROJECT_BUCKET}/releases/terraform_${_TF_VERSION}_linux_amd64.zip .
+            unzip -q terraform_${_TF_VERSION}_linux_amd64.zip -d /usr/local/bin
+          else
+            curl -sfOL \
+            https://releases.hashicorp.com/terraform/$_TF_VERSION/terraform_${_TF_VERSION}_linux_amd64.zip
+            unzip -q terraform_${_TF_VERSION}_linux_amd64.zip -d /usr/local/bin
+            gsutil -q cp -n terraform_${_TF_VERSION}_linux_amd64.zip gs://${_PROJECT_BUCKET}/releases
+          fi
+        
+        terraform init \
+          -backend-config="bucket=$_PROJECT_BUCKET" || exit 1
+
+        terraform destroy \
+          -var 'project=$_PROJECT_ID' -var 'region=$_REGION' -auto-approve
+        fi
+    dir: environments/$_ENVIRONMENT/gh-webhook
+    entrypoint: bash
+
+  - id: Destroy TF audit
+    name: gcr.io/cloud-builders/gcloud
+    args:
+      - '-c'
+      - |
+        if [ $_TFAUDIT_ENABLED == "true" ] && [ $_ENVIRONMENT != "prod" ]; then
+
+          export DEBCONF_NOWARNINGS=yes
+          apt-get update -yqq > /dev/null
+          apt-get install unzip -yqq > /dev/null
+
+          if gsutil -q stat gs://${_PROJECT_BUCKET}/releases/terraform_${_TF_VERSION}_linux_amd64.zip
+          then
+            gsutil -q cp \
+            gs://${_PROJECT_BUCKET}/releases/terraform_${_TF_VERSION}_linux_amd64.zip .
+            unzip -q terraform_${_TF_VERSION}_linux_amd64.zip -d /usr/local/bin
+          else
+            curl -sfOL \
+            https://releases.hashicorp.com/terraform/$_TF_VERSION/terraform_${_TF_VERSION}_linux_amd64.zip
+            unzip -q terraform_${_TF_VERSION}_linux_amd64.zip -d /usr/local/bin
+            gsutil -q cp -n terraform_${_TF_VERSION}_linux_amd64.zip gs://${_PROJECT_BUCKET}/releases
+          fi
+
+        terraform init \
+          -backend-config="bucket=$_PROJECT_BUCKET" || exit 1
+
+        terraform destroy \
+          -var 'project=$_PROJECT_ID' -var 'region=$_REGION' -auto-approve
+        fi
+    dir: environments/$_ENVIRONMENT/tf-audit
+    entrypoint: bash
+
+  - id: Destroy Releases Trigger
+    name: hashicorp/terraform:$_TF_VERSION
+    args:
+      - '-c'
+      - |
+        if [ $_RELEASES_ENABLED == "true" ] && [ $_ENVIRONMENT != "prod" ]; then
+
+        terraform init \
+          -backend-config="bucket=$_PROJECT_BUCKET" || exit 1
+
+        terraform destroy \
+          -var 'project=$_PROJECT_ID' -var 'region=$_REGION' -auto-approve
+        fi
+    dir: environments/$_ENVIRONMENT/releases
+    entrypoint: sh
+
+  - id: Destroy IAP
+    name: hashicorp/terraform:$_TF_VERSION
+    args:
+      - '-c'
+      - |
+        if [ $_IAP_ENABLED == "true" ]; then
+        terraform init \
+          -backend-config="bucket=$_PROJECT_BUCKET" || exit 1
+
+        terraform destroy \
+          -var 'project=$_PROJECT_ID' -var 'region=$_REGION' -auto-approve
+        fi
+    dir: environments/$_ENVIRONMENT/iap
+    entrypoint: sh
+    timeout: 600s
+
+  - id: Destroy Private Cloudbuild
+    name: hashicorp/terraform:$_TF_VERSION
+    args:
+      - '-c'
+      - |
+        if [ $_PRIVATE_ENABLED == "true" ] && [ $_ENVIRONMENT != "prod" ]; then
+        terraform init \
+          -backend-config="bucket=$_PROJECT_BUCKET" || exit 1
+
+        terraform destroy \
+          -var 'project=$_PROJECT_ID' -var 'region=$_REGION' -auto-approve
+        fi
+    dir: environments/$_ENVIRONMENT/private-cloudbuild
+    entrypoint: sh
+    timeout: 600s
+
+  - id: Destroy Ingress Nginx
+    name: hashicorp/terraform:$_TF_VERSION
+    args:
+      - '-c'
+      - |
+        if [ $_NGINX_ENABLED == "true" ]; then
+        terraform init \
+          -backend-config="bucket=$_PROJECT_BUCKET" || exit 1
+
+        terraform destroy \
+          -var 'project=$_PROJECT_ID' -var 'region=$_REGION' -auto-approve
+        fi
+    dir: environments/$_ENVIRONMENT/ingress-nginx
+    entrypoint: sh
+    timeout: 600s
+
+  - id: Destroy Applications
+    name: hashicorp/terraform:$_TF_VERSION
+    args:
+      - '-c'
+      - |
+        if [ $_ARGOAPPS_ENABLED == "true" ]; then
+        terraform init \
+          -backend-config="bucket=$_PROJECT_BUCKET" || exit 1
+
+        terraform destroy \
+          -var 'project=$_PROJECT_ID' -var 'region=$_REGION' -auto-approve
+        fi
+    dir: environments/$_ENVIRONMENT/argocd-apps
+    entrypoint: sh
+    timeout: 600s
+
+  - id: Destroy Argocd
+    name: hashicorp/terraform:$_TF_VERSION
+    args:
+      - '-c'
+      - |
+        if [ $_ARGOCD_ENABLED == "true" ]; then
+        terraform init \
+          -backend-config="bucket=$_PROJECT_BUCKET" || exit 1
+
+        terraform destroy \
+          -var 'project=$_PROJECT_ID' -var 'region=$_REGION' -auto-approve
+        fi
+    dir: environments/$_ENVIRONMENT/argocd-config
+    entrypoint: sh
+    timeout: 600s
+
+  - id: Destroy Sonarqube
+    name: hashicorp/terraform:$_TF_VERSION
+    args:
+      - '-c'
+      - |
+        if [ $_SONAR_ENABLED == "true" ]; then
+        terraform init \
+          -backend-config="bucket=$_PROJECT_BUCKET" || exit 1
+
+        terraform destroy \
+          -var 'project=$_PROJECT_ID' -var 'region=$_REGION' -auto-approve
+        fi
+    dir: environments/$_ENVIRONMENT/sonarqube
+    entrypoint: sh
+    timeout: 600s
+
+  - id: Destroy Reportportal
+    name: hashicorp/terraform:$_TF_VERSION
+    args:
+      - '-c'
+      - |
+        if [ $_REPORT_ENABLED == "true" ]; then
+
+        terraform init \
+          -backend-config="bucket=$_PROJECT_BUCKET" || exit 1
+
+        terraform destroy -var 'reportportal_version=$_RP_VERSION' \
+          -var 'project=$_PROJECT_ID' -var 'region=$_REGION' -auto-approve
+        fi
+    dir: environments/$_ENVIRONMENT/reportportal
+    entrypoint: sh
+    timeout: 600s
+
+  - id: Destroy Backstage
+    name: hashicorp/terraform:$_TF_VERSION
+    args:
+      - '-c'
+      - |
+        if [ $_BACKSTAGE_ENABLED == "true" ] && [ $_ENVIRONMENT != "prod" ]; then
+        terraform init \
+          -backend-config="bucket=$_PROJECT_BUCKET" || exit 1
+
+        terraform destroy \
+          -var 'project=$_PROJECT_ID' -var 'region=$_REGION' -auto-approve
+        fi
+    dir: environments/$_ENVIRONMENT/backstage
+    entrypoint: sh
+    timeout: 600s
+
+  - id: Destroy GKE
+    name: hashicorp/terraform:$_TF_VERSION
+    args:
+      - '-c'
+      - |
+        if [ $_KUBERNETES_ENABLED == "true" ]; then
+        terraform init \
+          -backend-config="bucket=$_PROJECT_BUCKET" || exit 1
+
+        terraform destroy \
+          -var 'project=$_PROJECT_ID' -var 'region=$_REGION' -auto-approve
+        fi
+    dir: environments/$_ENVIRONMENT/gke
+    entrypoint: sh
+    timeout: 1200s
+    
+substitutions:
+  _REGION: ''
+  _PROJECT_ID: ''
+  _RP_VERSION: ''
+  _TF_VERSION: ''
+  _ENVIRONMENT: ''
+  _LOGS_BUCKET: ''
+  _PROJECT_BUCKET: ''
+  _SERVICE_ACCOUNT : ''
+  _CI_ENABLED: 'true'
+  _CD_ENABLED: 'true'
+  _IAP_ENABLED: 'true'
+  _IAC_ENABLED: 'true'
+  _TFAUDIT_ENABLED: 'true'
+  _NGINX_ENABLED: 'true'
+  _SONAR_ENABLED: 'true'
+  _REPORT_ENABLED: 'true'
+  _ARGOCD_ENABLED: 'true'
+  _WEBHOOK_ENABLED: 'true'
+  _PRIVATE_ENABLED: 'true'
+  _RELEASES_ENABLED: 'true'
+  _ARGOAPPS_ENABLED: 'true'
+  _BACKSTAGE_ENABLED: 'true'
+  _KUBERNETES_ENABLED: 'true'
+
+options:
+  logging: GCS_ONLY
+logsBucket: gs://$_LOGS_BUCKET
+
+serviceAccount: projects/$_PROJECT_ID/serviceAccounts/$_SERVICE_ACCOUNT

@@ -1,0 +1,13 @@
+name: bookinfo
+source_url: https://github.com/example-org/bookinfo
+source_branch: main
+source_path: src
+gitops_url: https://github.com/example-org/gitops
+gitops_branch: bookinfo
+service_list:
+  - details
+  - productpage
+  - ratings
+  - reviews
+service_ui: productpage
+service_port: 9080

@@ -1,0 +1,16 @@
+name: petclinic
+source_url: https://github.com/example-org/spring-petclinic
+source_branch: master
+source_path: 
+gitops_url: https://github.com/example-org/ops
+gitops_branch: main
+service_list:
+  - spring-petclinic-admin-server
+  - spring-petclinic-api-gateway
+  - spring-petclinic-config-server
+  - spring-petclinic-customers-service
+  - spring-petclinic-discovery-server
+  - spring-petclinic-vets-service
+  - spring-petclinic-visits-service
+service_ui: spring-petclinic-api-gateway
+service_port: 8080
