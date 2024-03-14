@@ -1,0 +1,54 @@
+# Copyright 2023 EPAM Systems
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+steps:
+  - id: Deploy Bootstrap 
+    name: gcr.io/cloud-builders/gsutil
+    args:
+      - '-c'
+      - |
+        export TF_VAR_project=$(gcloud config get project)
+        export TF_VAR_region=$(gcloud compute project-info describe --project=$$TF_VAR_project \
+          --format="value(commonInstanceMetadata.items.google-compute-default-region)")
+        export TF_VAR_git_token=$(gcloud secrets versions access latest \
+          --secret=git-token --verbosity=none) 
+
+        if gsutil -q stat gs://${_PROJECT_BUCKET}/releases/terraform_${_TF_VERSION}_linux_amd64.zip
+        then
+          gsutil -q cp \
+          gs://${_PROJECT_BUCKET}/releases/terraform_${_TF_VERSION}_linux_amd64.zip .
+          unzip -q terraform_${_TF_VERSION}_linux_amd64.zip -d /usr/local/bin
+        else
+          curl -sfOL \
+          https://releases.hashicorp.com/terraform/$_TF_VERSION/terraform_${_TF_VERSION}_linux_amd64.zip
+          unzip -q terraform_${_TF_VERSION}_linux_amd64.zip -d /usr/local/bin
+          gsutil -q cp -n terraform_${_TF_VERSION}_linux_amd64.zip gs://${_PROJECT_BUCKET}/releases
+        fi
+
+        terraform init -backend-config="bucket=$_PROJECT_BUCKET" || exit 1
+        terraform apply -auto-approve -var-file=../extravars.tfvars
+    dir: bootstrap
+    entrypoint: bash
+
+substitutions:
+  _TF_VERSION: ''
+  _PROJECT_BUCKET: ''
+  _LOGS_BUCKET: ''
+  _SERVICE_ACCOUNT : ''
+
+options:
+  logging: GCS_ONLY
+logsBucket: gs://$_LOGS_BUCKET
+
+serviceAccount: projects/$_PROJECT_ID/serviceAccounts/$_SERVICE_ACCOUNT
