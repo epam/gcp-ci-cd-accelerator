@@ -1,0 +1,78 @@
+# Copyright 2023 EPAM Systems
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+steps:
+  - id: Generate Argocd Token
+    name: gcr.io/cloud-builders/gcloud
+    args:
+      - '-c'
+      - |
+        gcloud container clusters get-credentials \
+          $_CLUSTER --project $_PROJECT_ID --region $_REGION
+
+        kubectl -n $_NAMESPACE port-forward svc/argocd-server 80:443 &
+        
+        export DEBCONF_NOWARNINGS=yes
+        apt-get update -yqq > /dev/null
+        apt-get install net-tools jq -yqq > /dev/null
+
+        bearer_token=$(curl --silent --header "Content-Type: application/json" \
+                       --request POST \
+                       --data '{"username": "$_USER","password": "'"$$PASSWORD"'"}' \
+                       http://$_HOST/api/v1/session | jq -r '.token')
+
+        token=$(curl --silent --header "Authorization: Bearer $bearer_token" \
+                --request POST \
+                http://$_HOST/api/v1/account/$_USER/token | jq -r '.token')
+
+        if gcloud secrets describe --verbosity=none --no-user-output-enabled --quiet \
+              $_SECRET_TOKEN; then
+            
+          echo -n $token | \
+          gcloud secrets versions add $_SECRET_TOKEN --data-file=-
+
+        else
+
+          echo -n $token | \
+          gcloud secrets create $_SECRET_TOKEN --data-file=- \
+            --replication-policy=user-managed --locations=$_REGION --labels=service=$_SERVICE_NAME
+
+        fi
+    entrypoint: bash
+    secretEnv:
+      - PASSWORD
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/$_PROJECT_ID/secrets/$_SECRET/versions/latest
+      env: PASSWORD
+
+substitutions:
+  _HOST: ''
+  _USER: ''
+  _SECRET: ''
+  _REGION: ''
+  _CLUSTER: ''
+  _NAMESPACE: ''
+  _PROJECT_ID: ''
+  _LOGS_BUCKET: ''
+  _SERVICE_NAME: ''
+  _SECRET_TOKEN: ''
+  _SERVICE_ACCOUNT : ''
+
+options:
+  logging: GCS_ONLY
+logsBucket: gs://$_LOGS_BUCKET
+
+serviceAccount: projects/$_PROJECT_ID/serviceAccounts/$_SERVICE_ACCOUNT
